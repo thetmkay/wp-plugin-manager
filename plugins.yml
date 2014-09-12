@@ -1,0 +1,14 @@
+--- 
+require: 
+  jigsaw: 
+    ref: git@github.com:Upstatement/jigsaw.git
+    src: git
+  timber: 
+    ref: timber-library
+    name: timber-library
+    src: wp
+  acf: 
+    ref: advanced-custom-fields
+    name: advanced-custom-fields
+    src: wp
+path: ../../plugins/

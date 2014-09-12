@@ -1,0 +1,266 @@
+#!/usr/bin/env ruby
+
+require 'yaml'
+require 'optparse'
+
+puts Dir.pwd
+
+if(not File.file?('plugins.yml'))
+	puts "Could not find plugins.yml. Make sure you are in the correct working directory."
+else
+	config = YAML.load_file('plugins.yml')
+
+	plugins = config["require"]
+
+	def print_file(plugins)
+		plugins.each do |name,plugin|
+			puts "#{name} \t| #{plugin["src"]} \t| #{plugin["ref"]} \t| #{plugin["name"]}"
+		end
+	end
+
+	def write_file(plugins)
+		File.open('plugins.yml', 'w') {|f| f.write plugins.to_yaml }
+	end
+
+	def root(is_root)
+		if is_root
+			return "--allow-root"
+		else
+			return ""
+		end
+	end
+
+	def activate(name, plugin, path)
+		if(not plugin["name"].nil?)
+			name = plugin["name"]
+		end
+		if(not File.directory?(File.join(path, name)))
+			puts "Could not find #{File.join(path, name)}"
+			puts "Warning: are you sure you have the plugin installed?"
+		end
+
+		system("wp plugin activate #{name}")
+	end
+
+	def deactivate(name, plugin, path)
+		if(not plugin["name"].nil?)
+			name = plugin["name"]
+		end
+		if(not File.directory?(File.join(path, name)))
+			puts "Could not find #{File.join(path, name)}"
+			puts "Warning: are you sure you have the plugin installed?"
+		end
+
+		system("wp plugin deactivate #{name}")
+	end
+
+	def uninstall(name, plugin, path)
+		if(not plugin["name"].nil?)
+			name = plugin["name"]
+		end
+		if(not File.directory?(File.join(path, name)))
+			puts "Could not find #{File.join(path, name)}"
+			puts "Warning: are you sure you have the plugin installed?"
+		end
+
+		system("wp plugin uninstall #{name}")
+	end
+
+	def install(name, plugin, path, options)
+		if(not plugin["name"].nil?)
+			name = plugin["name"]
+		end
+		if(File.directory?(File.join(path, name)))
+			puts "The plugin directory #{name} already exists. If you really want to install, please remove before installing."
+			return
+		end
+		case plugin["src"]
+		when "git"
+			if options[:activate]
+				system("cd #{path} && git clone #{plugin["ref"]} #{name} && wp plugin activate #{root(options[:root])} #{name}")
+			else
+				system("cd #{path} && git clone #{plugin["ref"]} #{name}")
+			end
+		when "wp"
+			if(name != plugin["ref"])
+				puts "The name (#{name}) should equal the reference (#{plugin["ref"]}) for wp installs"
+			elsif options[:activate]
+				system("cd #{path} && wp plugin install #{root(options[:root])} --activate #{plugin["ref"]} ")
+			else
+				system("cd #{path} && wp plugin install #{root(options[:root])} #{plugin["ref"]} ")
+			end
+		else
+			puts "The source #{plugin["src"]} is not supported currently"
+		end
+	end
+
+	def update(name, plugin, path)
+
+		if(not plugin["name"].nil?)
+			name = plugin["name"]
+		end
+
+		if(not File.directory?(File.join(path, name)))
+			puts "The plugin directory #{name} doesn't exist. Please install before updating."
+			return
+		end
+
+		path = File.join(path, name)
+		puts path
+
+		case plugin["src"]
+		when "git"
+			system("cd #{path} && git pull origin master")
+		when "wp"
+			system("cd #{path} && wp plugin update #{plugin["ref"]} ")
+		else
+			puts "The source #{plugin["src"]} is not supported currently"
+		end
+	end
+
+	def add(name, options, config)
+		if name.nil?
+			puts "Cannot add plugin: did not specify name."
+			return
+		end
+		if not config["require"][name].nil?
+			puts "Plugin #{name} already exists. Please remove the plugin to add again."
+			return
+		end
+		if options[:src].nil?
+			puts "Cannot add plugin #{name}: did not specify source."
+			return
+		end
+		if options[:ref].nil?
+			puts "Cannot add plugin #{name}: did not specify reference."
+			return
+		end
+
+		plugin = {
+			"src" => options[:src],
+			"ref" => options[:ref]
+		}
+
+		if(options[:name])
+			plugin["name"] = options[:name]
+		end
+
+		config["require"][name] = plugin
+
+		write_file(config)
+	end
+
+	options = {}
+
+	opt_parser = OptionParser.new do |opt|
+	  opt.banner = "Usage: wpplugin COMMAND [NAME] [OPTIONS]"
+	  opt.separator  ""
+	  opt.separator  "Commands"
+	  opt.separator  "     install: install plugin"
+	  opt.separator  "     uninstall: uninstall plugin"
+	  opt.separator  "     add: add plugin to config file"
+	  opt.separator  "     update: update plugin"
+	  opt.separator  "     show: show plugins in config file"
+	  opt.separator  "     activate: activate plugin"
+	  opt.separator  "     deactivate: deactivate plugin"
+	  opt.separator  ""
+	  opt.separator  "Options"
+
+	  opt.on("-s","--src SOURCE","where the plugin should be downloaded from") do |source|
+	    options[:src] = source
+	  	options[:add] = true
+	  end
+
+	  opt.on("-ref","--reference REFERENCE","the reference to the plugin") do |reference|
+	    options[:ref] = reference
+	    options[:add] = true
+	  end
+
+	  opt.on("-n","--name NAME","the directory name of the plugin") do |reference|
+	    options[:name] = reference
+	    options[:add] = true
+	  end
+
+	  opt.on("-a", "--activate", "activate plugin") do
+	  	options[:activate] = true
+	  end
+
+	  opt.on("--allow-root", "allow root user/sudo") do
+	  	options[:root] = true
+	  end
+
+	  opt.on("-h","--help","help") do
+	    puts opt_parser
+	  end
+	end
+
+	opt_parser.parse!
+
+	name = ARGV[1]
+
+	plugin_path = config["path"]
+	if plugin_path.nil?
+		 plugin_path = "../../plugins/"
+	end
+
+	path = File.join(Dir.pwd, plugin_path)
+
+	case ARGV[0]
+	when "install"
+	  if name.nil?
+	  	plugins.each do |name,plugin|
+			install(name, plugin, path, options)
+		end
+	  elsif plugins[name].nil?
+	  	puts "The plugin #{name} has not been registered in the config file. Did you forget to add it?"
+	  else
+	  	install(name, plugins[name], path, options)
+	  end
+	when "update"
+	  if name.nil?
+	  	plugins.each do |name,plugin|
+			update(name, plugin, path)
+		end
+	  elsif plugins[name].nil?
+	  	puts "The plugin #{name} has not been registered in the config file. Did you forget to add it?"
+	  else
+	  	update(name, plugins[name], path)
+	  end
+	when "add"
+	  add(name,options,config)
+	when "show"
+	  print_file(plugins)
+	when "uninstall"
+  	  if name.nil?
+	  	plugins.each do |name,plugin|
+			uninstall(name, plugin, path)
+		end
+	  elsif plugins[name].nil?
+	  	puts "The plugin #{name} has not been registered in the config file. Did you forget to add it?"
+	  else
+	  	uninstall(name, plugins[name], path)
+	  end
+	when "activate"
+	  if name.nil?
+	  	plugins.each do |name,plugin|
+			activate(name, plugin, path)
+		end
+	  elsif plugins[name].nil?
+	  	puts "The plugin #{name} has not been registered in the config file. Did you forget to add it?"
+	  else
+	  	activate(name, plugins[name], path)
+	  end
+	when "deactivate"
+	  if name.nil?
+	  	plugins.each do |name,plugin|
+			deactivate(name, plugin, path)
+		end
+	  elsif plugins[name].nil?
+	  	puts "The plugin #{name} has not been registered in the config file. Did you forget to add it?"
+	  else
+	  	deactivate(name, plugins[name], path)
+	  end
+	else
+	  puts opt_parser
+	end
+end#endif
